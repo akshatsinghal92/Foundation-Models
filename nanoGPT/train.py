@@ -26,8 +26,11 @@ import numpy as np
 import torch
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.distributed import init_process_group, destroy_process_group
+import torch.nn as nn
+from torch.nn import functional as F
 
 from model import GPTConfig, GPT
+from general_metric import get_score
 
 # -----------------------------------------------------------------------------
 # default config values designed to train a gpt2 (124M) on OpenWebText
@@ -69,7 +72,7 @@ min_lr = 6e-5 # minimum learning rate, should be ~= learning_rate/10 per Chinchi
 # DDP settings
 backend = 'nccl' # 'nccl', 'gloo', etc.
 # system
-device = 'cuda' # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
+device = 'cpu' # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
 dtype = 'bfloat16' if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else 'float16' # 'float32', 'bfloat16', or 'float16', the latter will auto implement a GradScaler
 compile = True # use PyTorch 2.0 to compile the model to be faster
 # -----------------------------------------------------------------------------
@@ -133,6 +136,7 @@ def get_batch(split):
 # init these up here, can override if init_from='resume' (i.e. from a checkpoint)
 iter_num = 0
 best_val_loss = 1e9
+best_generic_val_loss = 1e9
 
 # attempt to derive vocab_size from the dataset
 meta_path = os.path.join(data_dir, 'meta.pkl')
@@ -177,7 +181,7 @@ elif init_from == 'resume':
             state_dict[k[len(unwanted_prefix):]] = state_dict.pop(k)
     model.load_state_dict(state_dict)
     iter_num = checkpoint['iter_num']
-    best_val_loss = checkpoint['best_val_loss']
+    best_val_loss = checkpoint['best_specific_val_loss']
 elif init_from.startswith('gpt2'):
     print(f"Initializing from OpenAI GPT-2 weights: {init_from}")
     # initialize from OpenAI GPT-2 weights
@@ -227,6 +231,40 @@ def estimate_loss():
     model.train()
     return out
 
+@torch.no_grad()
+def estimate_new_loss():
+    out = {}
+    model.eval()
+    for split in ['train', 'val']:
+        losses = torch.zeros(eval_iters)
+        bigram_losses = []
+        for k in range(eval_iters):
+            X, Y = get_batch(split)
+            with ctx:
+                logits, loss = model(X, Y)
+            losses[k] = loss.item()
+
+            log_probs = F.log_softmax(logits, dim=-1)
+            token_logp = log_probs.gather(-1, Y.unsqueeze(-1)).squeeze(-1)
+            bigram_logp = token_logp[:, :-1] + token_logp[:, 1:]
+            bigram_ce = -bigram_logp.mean().item()
+            bigram_losses.append(bigram_ce)
+
+        char_ce=sum(losses)/len(losses)
+        bigram_ce=sum(bigram_losses)/len(bigram_losses)
+        alpha=0.6
+
+        final_loss=(alpha*char_ce)+ ((1-alpha)*bigram_ce)
+
+        generic_score=get_score(logits, meta['itos'])
+
+        out[split] = final_loss, generic_score
+
+    model.train()
+    return out
+
+
+
 # learning rate decay scheduler (cosine with warmup)
 def get_lr(it):
     # 1) linear warmup for warmup_iters steps
@@ -252,6 +290,7 @@ t0 = time.time()
 local_iter_num = 0 # number of iterations in the lifetime of this process
 raw_model = model.module if ddp else model # unwrap DDP container if needed
 running_mfu = -1.0
+print(iter_num)
 while True:
 
     # determine and set the learning rate for this iteration
@@ -261,8 +300,9 @@ while True:
 
     # evaluate the loss on train/val sets and write checkpoints
     if iter_num % eval_interval == 0 and master_process:
-        losses = estimate_loss()
-        print(f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
+        losses = estimate_new_loss()
+
+        print(f"step {iter_num}: train loss {losses['train']}, val loss {losses['val']}")
         if wandb_log:
             wandb.log({
                 "iter": iter_num,
@@ -271,19 +311,38 @@ while True:
                 "lr": lr,
                 "mfu": running_mfu*100, # convert to percentage
             })
-        if losses['val'] < best_val_loss or always_save_checkpoint:
-            best_val_loss = losses['val']
+        if losses['val'][0] < best_val_loss or always_save_checkpoint:
+            best_val_loss = losses['val'][0]
             if iter_num > 0:
                 checkpoint = {
                     'model': raw_model.state_dict(),
                     'optimizer': optimizer.state_dict(),
                     'model_args': model_args,
                     'iter_num': iter_num,
-                    'best_val_loss': best_val_loss,
+                    'best_specific_val_loss': best_val_loss,
+                    'best_generic_val_loss':best_generic_val_loss,
                     'config': config,
                 }
                 print(f"saving checkpoint to {out_dir}")
                 torch.save(checkpoint, os.path.join(out_dir, 'ckpt.pt'))
+
+        if losses['val'][1] < best_generic_val_loss or always_save_checkpoint:
+            best_generic_val_loss = losses['val'][1]
+            if iter_num > 0:
+                checkpoint = {
+                    'model': raw_model.state_dict(),
+                    'optimizer': optimizer.state_dict(),
+                    'model_args': model_args,
+                    'iter_num': iter_num,
+                    'best_specific_val_loss': best_val_loss,
+                    'best_generic_val_loss':best_generic_val_loss,
+                    'config': config,
+                }
+                print(f"saving checkpoint to {out_dir}")
+                torch.save(checkpoint, os.path.join(out_dir, 'ckpt.pt'))
+    
+
+    
     if iter_num == 0 and eval_only:
         break
 

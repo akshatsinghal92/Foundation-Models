@@ -9,15 +9,49 @@ import pickle
 import requests
 import numpy as np
 
+## FOR FINE TUNING
+
+
+input_file_path = "/Users/Patron/Desktop/Foundation-Models/Foundation-Models/nanoGPT/data/shakespeare_char/input.txt"
+with open(input_file_path, 'r') as f:
+    data = f.read()
+
+chars = sorted(list(set(data)))
+
+
 # download the tiny shakespeare dataset
+
+# data=""
+# for i in os.listdir("/Users/Patron/Desktop/Foundation-Models/Foundation-Models/nanoGPT/data/harry_potter"):
+#     if ".txt" in i:
+#         input_file_path = os.path.join(os.path.dirname(__file__), i)
+#         with open(input_file_path, 'r') as f:
+#             data += f.read()
+
 input_file_path = os.path.join(os.path.dirname(__file__), '04 Harry Potter and the Goblet of Fire.txt')
 
 with open(input_file_path, 'r') as f:
     data = f.read()
+
+# data=data[:int(len(data)*0.5)]
+
+## FOR FINE TUNING
+chars1 = sorted(list(set(data)))
+extra_chars=""
+for i in chars1:
+    if i not in chars:
+        extra_chars+=i
+
+for i in extra_chars:
+    data=data.replace(i, "")
+
+
+
+
 print(f"length of dataset in characters: {len(data):,}")
 
 # get all the unique characters that occur in this text
-chars = sorted(list(set(data)))
+# chars = sorted(list(set(data)))
 vocab_size = len(chars)
 print("all the unique characters:", ''.join(chars))
 print(f"vocab size: {vocab_size:,}")
