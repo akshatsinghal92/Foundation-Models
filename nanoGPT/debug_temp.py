@@ -12,7 +12,6 @@ with open(input_file_path, 'r') as f:
 
 print(f"length of dataset in characters: {len(data):,}")
 
-# get all the unique characters that occur in this text
 chars = sorted(list(set(data)))
 vocab_size = len(chars)
 print("all the unique characters:", ''.join(chars))
@@ -25,7 +24,7 @@ input_file_path ="/Users/Patron/Desktop/Foundation-Models/Foundation-Models/nano
 with open(input_file_path, 'r') as f:
     data1 = f.read()
 
-# get all the unique characters that occur in this text
+
 chars1 = sorted(list(set(data1)))
 vocab_size1 = len(chars1)
 print("all the unique characters:", ''.join(chars1))
