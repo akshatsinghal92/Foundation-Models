@@ -12,11 +12,11 @@ import numpy as np
 ## FOR FINE TUNING
 
 
-input_file_path = "/Users/Patron/Desktop/Foundation-Models/Foundation-Models/nanoGPT/data/shakespeare_char/input.txt"
-with open(input_file_path, 'r') as f:
-    data = f.read()
+# input_file_path = "/Users/Patron/Desktop/Foundation-Models/Foundation-Models/nanoGPT/data/shakespeare_char/input.txt"
+# with open(input_file_path, 'r') as f:
+#     data = f.read()
 
-chars = sorted(list(set(data)))
+# chars = sorted(list(set(data)))
 
 
 # download the tiny shakespeare dataset
@@ -33,17 +33,19 @@ input_file_path = os.path.join(os.path.dirname(__file__), '04 Harry Potter and t
 with open(input_file_path, 'r') as f:
     data = f.read()
 
+chars = sorted(list(set(data)))
+
 # data=data[:int(len(data)*0.5)]
 
 ## FOR FINE TUNING
-chars1 = sorted(list(set(data)))
-extra_chars=""
-for i in chars1:
-    if i not in chars:
-        extra_chars+=i
+# chars1 = sorted(list(set(data)))
+# extra_chars=""
+# for i in chars1:
+#     if i not in chars:
+#         extra_chars+=i
 
-for i in extra_chars:
-    data=data.replace(i, "")
+# for i in extra_chars:
+#     data=data.replace(i, "")
 
 
 

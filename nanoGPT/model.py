@@ -170,6 +170,24 @@ class Block(nn.Module):
         x = x + self.mlp(self.ln_2(x))
         return x
 
+
+class RewardModel(nn.Module):
+
+    def __init__(self, base_model, hidden_size):
+        super().__init__()
+        self.base_model = base_model
+        self.reward_head = nn.Linear(hidden_size, 1)
+
+    def forward(self, input_ids):
+        logits, hidden_states = self.base_model(input_ids, return_hidden=True)
+
+        last_hidden = hidden_states[:, -1, :]
+
+        reward = self.reward_head(last_hidden)
+        return reward.squeeze(-1)
+
+
+
 @dataclass
 class GPTConfig:
     block_size: int = 1024
@@ -395,3 +413,18 @@ class GPT(nn.Module):
             idx = torch.cat((idx, idx_next), dim=1)
 
         return idx
+
+class RewardDataset(torch.utils.data.Dataset):
+    def __init__(self, texts, tokenizer, scorer):
+        self.texts = texts
+        self.tokenizer = tokenizer
+        self.scorer = scorer
+
+    def __len__(self):
+        return len(self.texts)
+
+    def __getitem__(self, idx):
+        text = self.texts[idx]
+        tokens = self.tokenizer.encode(text, add_special_tokens=False)
+        reward = self.scorer(text)
+        return torch.tensor(tokens, dtype=torch.long), torch.tensor(reward, dtype=torch.float32)
